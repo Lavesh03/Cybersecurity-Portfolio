@@ -1,0 +1,32 @@
+
+
+Incident Handling and response:-
+
+TRIAGE: Escalate
+Classification: True Positive
+REASON: Check In the azure logs and found that 275 failed logins from one Ip address 192.168.189.129 and also one successful login from this one particular IP address so Pattern matches known attack technique (T1110), confirmed by raw log evidence with the given KQl queries, no legitimate business justification, source IP is internal attacker machine (Kali lab) 192.168.189.129 and further check on virus Total and AbuesIPDB website and found that this a private Ip address not public Ip address. IF its a private Ip then still it not possible that much failed login attempts.
+
+KQL:-This KQl is help you found more evidence and for clarification this is true positive.
+
+1.AttackLogs_CL
+| where RawData has "EventCode=4625"
+| extend Account = extract(@"Account Name:\s+(\S+)", 1, RawData)
+| extend SourceIP = extract(@"Source Network Address:\s+(\d+\.\d+\.\d+\.\d+)", 1, RawData)
+| summarize FailedAttempts=count(), First=min(TimeGenerated), Last=max(TimeGenerated) by Account, SourceIP
+
+2.AttackLogs_CL
+| where RawData has "EventCode=4624" and RawData has "192.168.189.129"
+| extend Account = extract(@"Account Name:\s+(\S+)", 1, RawData)
+| project TimeGenerated, Account, RawData
+
+RECOMMENDATION:
+  - Isolate the machine from the shuffle soar and azure soar
+  - Block/monitor source IP if you found the root cause 
+  - Reset affected account credentials from azure admin 365 
+  - Review for persistence (scheduled tasks, new accounts)
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS: Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

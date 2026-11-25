@@ -1,0 +1,51 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check on the azure sentinel and defender portal incident and found that user and victim download the file from the url HostUrl=http://192.168.189.129/Analysis.exe and file name is Analysis(1).exe which gives the remote access to Host IP address port no 4444 and also check the files and hash of them which give the remote shell access to host and attacker 192.168.189.129 and also check the files on the VirusTotal and AbuesIPDB and found malicious but some of the file is not malicious because of some files are created with encoding techniques so it can't be detected. Also attach the KQL which is help to find this incident is true positive.
+
+KQL:-
+1.AttackLogs_CL
+| where RawData has "Downloads" and RawData has "Zone.Identifier"
+| extend FileName = extract(@"\\Downloads\\([^<\\]+\.exe)", 1, RawData)
+| extend ParentBrowser = extract(@"ParentImage'>([^<]+)", 1, RawData)
+| project TimeGenerated, Host, FileName, ParentBrowser, RawData
+| sort by TimeGenerated asc
+
+2.AttackLogs_CL
+| where RawData has "Downloads" and RawData has "DestinationIp"
+| extend FileName = extract(@"Image'>[^<]*\\Downloads\\([^<\\]+\.exe)", 1, RawData)
+| extend DestIP = extract(@"DestinationIp'>(\d+\.\d+\.\d+\.\d+)", 1, RawData)
+| extend DestPort = toint(extract(@"DestinationPort'>(\d+)", 1, RawData))
+| where DestPort !in (80, 443, 53, 22, 25, 587, 143, 993, 995)
+| summarize ConnectionCount=count() by FileName, DestIP, DestPort
+
+3.AttackLogs_CL
+| where RawData has "Analysis" and RawData has "Zone.Identifier"
+| extend ParentImage = extract(@"ParentImage'>([^<]+)", 1, RawData)
+| project TimeGenerated, Host, ParentImage, RawData
+| sort by TimeGenerated asc
+
+4.AttackLogs_CL
+| where RawData has "Analysis" and RawData has "Hash"
+| extend MD5 = extract(@"MD5=([A-F0-9]+)", 1, RawData)
+| extend SHA256 = extract(@"SHA256=([A-F0-9]+)", 1, RawData)
+| extend CreationTime = extract(@"CreationUtcTime'>([^<]+)", 1, RawData)
+| project TimeGenerated, MD5, SHA256, CreationTime
+
+5.AttackLogs_CL
+| where RawData has "Analysis" and RawData has "DestinationIp"
+| extend DestIP = extract(@"DestinationIp'>(\d+\.\d+\.\d+\.\d+)", 1, RawData)
+| extend DestPort = extract(@"DestinationPort'>(\d+)", 1, RawData)
+| extend SourcePort = extract(@"SourcePort'>(\d+)", 1, RawData)
+| summarize ConnectionCount=count(), First=min(TimeGenerated), Last=max(TimeGenerated) by DestIP, DestPort
+
+RECOMMENDATION:
+  - Isolate the Host and victim by Shuffle soar and azure soar
+  - Remove the file from machine and check where the saves in which group
+  - Check the files hashes 
+  - Need the guidance to user or victim to do not download any file from any URL and any website which is not verified and allowed from organization and maintain the compliance and Policies of GDPR and DPA.
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

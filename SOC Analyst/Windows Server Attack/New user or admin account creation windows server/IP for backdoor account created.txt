@@ -1,0 +1,55 @@
+
+
+TRIAGE: Escalate
+Classification:-True Positive
+REASON: Check on the incident in defender and sentinel and check the logs and found that the there is one IP address got the access of RDP of the victim 192.168.189.140 and successful login from machine kali 192.168.189.129 and after taking the RDP access attacker create one Admin account name Security_patch_svc2 and event code for making new admin account or account and give them admin access is 4738 and 4724 and 4732 clearly visible in logs and its clearly pattern of backdoor account making for attacker. But further check on check on virus Total and AbuesIPDB website and found that this a private Ip address not public Ip address.Account exists in BOTH places (on-prem AD + Azure AD)
+
+KQL:- 
+1.AttackLogs_CL
+| where RawData has "EventCode=4624" and RawData has "192.168.189.129"
+| extend Account = extract(@"Account Name:\s+(\S+)", 1, RawData)
+| extend LogonType = extract(@"Logon Type:\s+(\d+)", 1, RawData)
+| project TimeGenerated, Account, LogonType, RawData
+| sort by TimeGenerated asc
+
+2.AttackLogs_CL
+| where RawData has "EventCode=4720"
+| extend NewAccount = extract(@"Account Name:\s+(\S+)", 1, RawData)
+| extend CreatedBy = extract(@"Subject:.*?Account Name:\s+(\S+)", 1, RawData)
+| project TimeGenerated, NewAccount, CreatedBy, RawData
+| sort by TimeGenerated asc
+
+3.AttackLogs_CL
+| where RawData has_any ("EventCode=4728", "EventCode=4732")
+| extend Account = extract(@"Member Name:.*?Account Name:\s+(\S+)", 1, RawData)
+| extend GroupName = extract(@"Group Name:\s+(\S+)", 1, RawData)
+| project TimeGenerated, Account, GroupName, RawData
+
+4.AttackLogs_CL
+| where RawData has_any ("EventCode=4738", "EventCode=4724")
+| where RawData has_any ( "security_patch_svc2")
+| project TimeGenerated, RawData
+
+5.AttackLogs_CL
+| where RawData has "security_patch_svc2" and RawData has_any ("EventCode=4728", "EventCode=4732")
+| extend AssignedBy = extract(@"Subject:.*?Security ID:[^<]*Account Name:\s+(\S+)", 1, RawData)
+| extend GroupName = extract(@"Group Name:\s+(\S+)", 1, RawData)
+| extend MemberAdded = extract(@"Member:.*?Account Name:\s+(\S+)", 1, RawData)
+| project TimeGenerated, MemberAdded, GroupName, AssignedBy, RawData
+
+6.AttackLogs_CL
+| where RawData has "security_patch_svc2"
+| project TimeGenerated, RawData
+| sort by TimeGenerated asc
+
+
+RECOMMENDATION:
+  - Block/monitor source IP from shuffle soar and isolate the victim machine 
+  - Remove the account from Admin 365 and Entra ID Azure
+  - Disabled backdoor account security_patch_svc2 in on-premises Active Directory confirmed sync to Azure AD via Azure AD Connect
+  - then permanently deleted account from source(on-prem AD) to ensure removal across both on-prem and cloud identity stores.
+
+ESCALATION: Escalate to L2 for deeper forensics and deeper investigation regarding the backdoor account created from the RDP access (root cause, full kill chain reconstruction)
+— NOT because L1 can't handle it, but because full RCA + threat-hunting across environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

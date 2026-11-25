@@ -1,0 +1,53 @@
+TRIAGE: Escalate
+Classification: True Positive
+Reason:-Check in the logs and found that victim click on the phishing email which is comes from rnicrosoftservices.com@gmail.com and click on the URL and he login in the URL page of Microsoft login page and he entered his credentials of Microsoft azure. Further check in the logs and found the page is hosted on this URL and Ip address http://192.168.189.129:8080/login.html and also found the POST request also goes to this page and server so kindly check of pcap file and found the full evidence which i mention here and further check the credentials of users and it matches.check on virus Total and AbuesIPDB website and found that this a private Ip address not public Ip address.
+19:51:52 UTC → GET / (initial connection to 192.168.189.129:8080)
+19:51:58 UTC → GET /login.html (phishing page loaded)
+19:52:23 UTC → GET /Converged_v21033.css, ConvergedLogin_PCore.js, microsoft_logo.svg
+               (zphisher Microsoft 365 template assets confirmed)
+19:52:40 UTC → POST /login.php (credentials submitted)
+               loginfmt=laveshs051@gmail.com
+               passwd=********
+KQL:-
+1.AttackLogs_CL
+| where TimeGenerated > ago(60d)
+| where RawData has_any ("login.html", "login.php", "ConvergedLogin")
+| project TimeGenerated, Host, RawData
+| sort by TimeGenerated asc
+
+2.AttackLogs_CL
+| where TimeGenerated > ago(60d)
+| where RawData has_any ("login.html", "login.php")
+| extend SourceIP = extract(@"(\d+\.\d+\.\d+\.\d+)", 1, RawData)
+| extend Method = extract(@'"(GET|POST)', 1, RawData)
+| extend Path = extract(@'"(?:GET|POST)\s+(\S+)', 1, RawData)
+| project TimeGenerated, Host, SourceIP, Method, Path
+
+3.AttackLogs_CL
+| where TimeGenerated > ago(60d)
+| where RawData has "login.php" and RawData has "POST"
+| project TimeGenerated, Host, RawData
+
+PCAP file on Wireshark:-
+1.tcp.port=8080 || udp.port=8080
+2.http.request
+3.http.request.uri contains "login.html"
+4.http.request.method == "POST" and http.request.uri contains "login.php"
+5.http contains "passwd"
+6.http.request.uri contains "ConvergedLogin" or http.request.uri contains "microsoft_logo"
+7.ip.addr == 192.168.189.129
+8.ip.src == 192.168.189.140 and ip.dst == 192.168.189.129
+
+RECOMMENDATION:
+  - Isolate the machine from the shuffle soar and azure soar
+  - Block/monitor source IP  
+  - Reset affected account credentials from azure admin 365 
+  - Review for persistence (scheduled tasks, new accounts)
+  - Give user guidance for this phishing email 
+  - Reset the credentials of user email account
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS: Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction))
