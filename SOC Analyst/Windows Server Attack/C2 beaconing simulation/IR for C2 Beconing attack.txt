@@ -1,0 +1,80 @@
+TRIAGE: Escalate
+CLASSIFICATION: True Positive
+
+REASON: Process C:\Users\Administrator\Downloads\do.exe established 185 outbound 
+connections to 192.168.189.129:8080 within a 10-minute window — consistent with 
+automated C2 beaconing rather than normal application behavior. File confirmed 
+downloaded via msedge.exe with Zone.Identifier (Mark-of-the-Web) present. 
+Destination IP is internal/private (RFC1918), consistent with lab attacker 
+infrastructure, not externally reputation-checked.
+
+KQL:
+0.AttackLogs_CL
+| where RawData has "Downloads" and RawData has "Zone.Identifier"
+| extend FileName = extract(@"\\Downloads\\([^<\\]+\.exe)", 1, RawData)
+| extend ParentBrowser = extract(@"ParentImage'>([^<]+)", 1, RawData)
+| project TimeGenerated, Host, FileName, ParentBrowser, RawData
+| sort by TimeGenerated asc
+
+1. AttackLogs_CL
+| where RawData has "do.exe" and RawData has "DestinationIp"
+| extend DestIP = extract(@"DestinationIp'>(\d+\.\d+\.\d+\.\d+)", 1, RawData)
+| extend DestPort = extract(@"DestinationPort'>(\d+)", 1, RawData)
+| summarize Connections=count() by DestIP, DestPort
+
+2. AttackLogs_CL
+| where RawData has "do.exe" and RawData has "DestinationIp"
+| summarize count() by bin(TimeGenerated, 10s)
+| sort by TimeGenerated asc
+
+3. AttackLogs_CL
+| where RawData has "do.exe" and RawData has "Zone.Identifier"
+| extend ParentImage = extract(@"ParentImage'>([^<]+)", 1, RawData)
+| extend MD5 = extract(@"MD5=([A-F0-9]+)", 1, RawData)
+| extend SHA256 = extract(@"SHA256=([A-F0-9]+)", 1, RawData)
+| project TimeGenerated, Host, ParentImage, MD5, SHA256
+
+4.AttackLogs_CL
+| where RawData has "do.exe" and RawData has "Zone.Identifier"
+| extend ParentImage = extract(@"ParentImage'>([^<]+)", 1, RawData)
+| project TimeGenerated, Host, ParentImage, RawData
+| sort by TimeGenerated asc
+
+5.AttackLogs_CL
+| where RawData has "do.exe" and RawData has "Hash"
+| extend MD5 = extract(@"MD5=([A-F0-9]+)", 1, RawData)
+| extend SHA256 = extract(@"SHA256=([A-F0-9]+)", 1, RawData)
+| extend CreationTime = extract(@"CreationUtcTime'>([^<]+)", 1, RawData)
+| project TimeGenerated, MD5, SHA256, CreationTime
+
+PCAP file queries:-
+1.ip.addr == 192.168.189.129 and tcp.port == 8080
+2.http.request and ip.dst == 192.168.189.129
+3.http.request.uri contains "upload" or http.request.uri contains "actions/samples"
+4.http.response and ip.src == 192.168.189.129
+5.http.set_cookie contains "PHPSESSID"
+6.ip.src == 192.168.189.140 and ip.dst == 192.168.189.129 and tcp.flags.syn == 1
+7.http.request.uri matches "\\?[a-z]=[0-9a-z]+"
+
+IOCs:
+  - File: do.exe
+  - Hash: MD5=475E7CB23F0FD971788F95D874DA888F, SHA256=F557517FC35221C4EAEBAFA3...
+  - C2 server: 192.168.189.129:8080
+  - Protocol: HTTP (masqueraded as normal web traffic)
+  - C2 endpoints: /upload/sign-up.php, /upload/login.php, /upload/rpc.php, /actions/samples.html, /assets/jquery.js
+  - Session tracking: PHPSESSID cookie set by C2 server
+  - Evasion technique: randomized query string parameters on every request (anti-signature detection)
+  - Ephemeral port rotation: 83 unique source ports observed in ~2 min (reconnect pattern)
+
+RECOMMENDATION:
+  - Kill process do.exe immediately on affected host (DC01)
+  - Isolate victim machine via Shuffle SOAR / Azure automation
+  - Block outbound traffic to 192.168.189.129:8080 at firewall/NSG
+  - Hunt for same hash (SHA256) across other hosts in environment
+  - Review what commands were sent via the beacon channel (if shell access confirmed)
+
+ESCALATION: Escalate to L2 for full reverse-engineering of do.exe (sandbox detonation, 
+behavior analysis) and to determine if attacker issued commands during the active 
+beacon window — this requires deeper forensics beyond L1 scope.
+
+STATUS: Active → Escalate to L2 (malware analysis + command history reconstruction).

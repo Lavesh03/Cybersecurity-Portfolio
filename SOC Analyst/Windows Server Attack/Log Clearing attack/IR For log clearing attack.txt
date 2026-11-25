@@ -1,0 +1,48 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check the incident in azure sentinel or defender and found that attacker after taking the RDP access on victim machine he did some activity and the patterns are not recognizable and also found attacker try to clear the tracks and logs with event code 1102 and with command wevtutil and RDP access got by private IP address 192.168.189.129 check on virustotal and AbuseIPDB and found this is not public IP address.
+
+
+KQl:-
+1.AttackLogs_CL
+| where Host == "DC01"
+| where RawData has_any ("EventCode=4624", "EventCode=1102")
+| extend EventType = iff(RawData has "EventCode=4624", "Login", "LogCleared")
+| summarize Timestamps = make_list(pack("time", TimeGenerated, "type", EventType))
+
+2.AttackLogs_CL
+| where RawData has_any ("wevtutil cl", "Clear-EventLog", "EventCode=1102")
+| project TimeGenerated, Host, RawData
+
+3.AttackLogs_CL
+| where Host == "DC01"
+| where RawData has_any ("EventCode=4624", "EventCode=1102", "wevtutil")
+| extend EventType = case(
+    RawData has "EventCode=4624", "Successful Login",
+    RawData has "EventCode=1102" or RawData has "wevtutil", "Log Cleared",
+    "Other"
+  )
+| extend Account = extract(@"Account Name:\s+(\S+)", 1, RawData)
+| project TimeGenerated, EventType, Account, RawData
+| sort by TimeGenerated asc
+
+4.AttackLogs_CL
+| where RawData has_any ("EventCode=1102", "wevtutil")
+| extend LogType = extract(@"Channel'>([^<]+)", 1, RawData)
+| extend LogTypeAlt = extract(@"wevtutil cl (\S+)", 1, RawData)
+| project TimeGenerated, Host, LogType, LogTypeAlt, RawData
+
+5.AttackLogs_CL
+| where RawData has_any ("EventCode=1102", "wevtutil")
+| project TimeGenerated, RawData
+
+RECOMMENDATION:
+  - Isolate the victim machine via Shuffle soar and azure soar 
+  - Block inbound and outbound traffic from 192.168.189.129 on firewall
+  - Reset affected account credentials from azure admin 365 
+  - Review for persistence (scheduled tasks, new accounts)
+
+ESCALATION: Escalate to L2 for deeper forensics and deeper investigation regarding the backdoor account created from the RDP access (root cause, full kill chain reconstruction)
+— NOT because L1 can't handle it, but because full RCA + threat-hunting across environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).
