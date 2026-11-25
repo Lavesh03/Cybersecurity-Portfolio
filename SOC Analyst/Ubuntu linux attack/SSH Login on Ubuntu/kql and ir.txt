@@ -1,0 +1,34 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check the incident in defender and sentinel also check logs and found that the victim SSH remote access got by the attacker 192.168.189.129 further check and found that there are lots of failed logins attempts are tried on victims account and one successful logins attempt and after getting access attacker run some malicious command. I attach some KQL to help for further investigation for this IR report.
+
+KQL:-
+1.AttackLogs_CL
+| where RawData contains "Failed password"
+| extend SrcIP = extract(@"from (\S+)", 1, RawData),
+         User = extract(@"for (?:invalid user )?(\S+) from", 1, RawData)
+| summarize Attempts = count(), DistinctUsers = dcount(User), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by SrcIP
+| order by Attempts desc
+
+2.AttackLogs_CL
+| where RawData contains "Accepted password"
+| extend SrcIP = extract(@"from (\S+)", 1, RawData),
+         User = extract(@"for (\S+) from", 1, RawData)
+| project TimeGenerated, Host, SrcIP, User, RawData
+| order by TimeGenerated asc
+
+RECOMMENDATION:
+     - Isolate the victims machine from shuffle soar 
+     - Block the inbound and outbound connection form the 192.168.189.129
+     - Reset the victims credentials
+     - Disable the victims account and remove victim from the security groups and any groups
+
+IOCs:
+     - Attacker IP 192.168.189.129
+     - Attacker workstation name Kali
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

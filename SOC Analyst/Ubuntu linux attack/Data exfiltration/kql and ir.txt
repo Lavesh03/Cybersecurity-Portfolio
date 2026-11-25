@@ -1,0 +1,47 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check the incident in sentinel and defender and found that after taking the remote SSH port access of victim by attacker (192.168.189.129) he try to check some data via malicious command. HE is successful to steal the file of SOCLAB_sensitive_data.txt file from the tmp folder and this the path of file /tmp/SOCLAB_sensitive_data.txt from the sftp-server i attach the process of sftp-server (process=/usr/lib/openssh/sftp-server user=lavesh).Attacker steal the file and move the file to the his system. I attach some KQL to help for further investigation for this IR report.
+
+KQL:-
+1.AttackLogs_CL
+| where Source == "auditd"
+| where RawData contains "opened-file" and RawData contains "success"
+| where RawData contains "sftp-server" or RawData contains "/usr/bin/scp"
+| extend FilePath = extract(@"file=(\S+)", 1, RawData),
+         ProcessPath = extract(@"process=(\S+)", 1, RawData),
+         User = extract(@"user=(\S+)", 1, RawData)
+| project TimeGenerated, Host, FilePath, ProcessPath, User, RawData
+
+2.AttackLogs_CL
+| where Source == "auditd"
+| where RawData contains "opened-file" and RawData contains "success"
+| extend FilePath = extract(@"file=(\S+)", 1, RawData),
+         ProcessPath = extract(@"process=(\S+)", 1, RawData),
+         User = extract(@"user=(\S+)", 1, RawData)
+| project TimeGenerated, Host, FilePath, ProcessPath, User
+| order by TimeGenerated asc
+
+3.AttackLogs_CL
+| where Source == "auditd"
+| where RawData contains "opened-file" and RawData contains "success"
+| where RawData contains "sftp-server" or RawData contains "/usr/bin/scp"
+| extend FilePath = extract(@"file=(\S+)", 1, RawData), User = extract(@"user=(\S+)", 1, RawData)
+| project TimeGenerated, Host, FilePath, User
+
+
+IOCs:-
+  - file name SOCLAB_sensitive_data.txt
+  - folder name and path  /tmp/SOCLAB_sensitive_data.txt
+  - sftp-server (process=/usr/lib/openssh/sftp-server user=lavesh)
+  - Attacker IP address 192.168.189.129
+
+RECOMMENDATION:
+  - Isolate the victim machine via Shuffle soar and azure soar 
+  - Block inbound and outbound traffic from 192.168.189.129 on firewall
+  - Reset affected account credentials from azure admin 365 
+  - Review for persistence (scheduled tasks, new accounts)
+
+ESCALATION: Escalate to L2 for deeper forensics and deeper investigation regarding the backdoor account created from the RDP access (root cause, full kill chain reconstruction)
+— NOT because L1 can't handle it, but because full RCA + threat-hunting across environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

@@ -1,0 +1,54 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check the incident in defender and sentinel also check logs and found that the victim SSH remote access got by the attacker 192.168.189.129 further check and found that there are lots of failed logins attempts are tried on victims account and one successful logins attempt and after getting access attacker run some malicious command. I attach some KQL to help for further investigation for this IR report.
+
+Kql:-
+1.let window = 10m;
+let RemoteLogins = AttackLogs_CL
+    | where RawData has "Accepted password" and RawData has "ssh2"
+    | extend SrcIP = extract(@"from (\S+)", 1, RawData)
+    | project LoginTime = TimeGenerated, Host, SrcIP;
+let SudoCmds = AttackLogs_CL
+    | where RawData has "COMMAND="
+    | extend Cmd = extract(@"COMMAND=(.*)", 1, RawData),
+             User = extract(@"sudo:\s*(\S+)\s*:", 1, RawData)
+    | project CmdTime = TimeGenerated, Host, User, Cmd;
+RemoteLogins
+| join kind=inner (SudoCmds) on Host
+| where CmdTime between (LoginTime .. (LoginTime + window))
+| summarize LoginTime = min(LoginTime) by CmdTime, Host, SrcIP, User, Cmd
+| order by CmdTime asc
+
+2.AttackLogs_CL
+| where RawData contains "COMMAND="
+| extend Cmd = extract(@"COMMAND=(.*)", 1, RawData)
+| extend Tactic = case(
+    Cmd has "/etc/shadow", "Credential Access",
+    Cmd has "find" and Cmd has "/bin/sh", "Privilege Escalation",
+    Cmd has "ss -tulpn" or Cmd has "ps aux", "Discovery",
+    Cmd has "systemctl enable" or Cmd has "sandbox-check", "Persistence",
+    "Other")
+| where Tactic != "Other"
+| summarize Count = count() by Tactic
+
+3.AttackLogs_CL
+| where RawData contains "sandbox-audit.service"
+| project TimeGenerated, Host, RawData
+| order by TimeGenerated desc
+
+RECOMMENDATION:
+     - Isolate the victims machine from shuffle soar 
+     - Block the inbound and outbound connection form the 192.168.189.129
+     - Reset the victims credentials
+     - Disable the victims account and remove victim from the security groups and any groups
+
+IOCs:
+     - Attacker IP 192.168.189.129
+     - Attacker workstation name Kali
+     - run malicious commands /usr/bin/su ,/usr/bin/cat /etc/shadow,/usr/bin/find . -exec /bin/sh -p ; -quit,/usr/bin/cat /root/.ssh/authorized_keys, /usr/bin/systemctl enable sandbox-audit.service
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).

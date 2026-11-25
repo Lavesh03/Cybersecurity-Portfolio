@@ -1,0 +1,80 @@
+TRIAGE: Escalate
+Classification:- true Positive
+REASON: Check the incident in defender and sentinel also check logs and found that the victim SSH remote access got by the attacker 192.168.189.129 further check and found that there are lots of failed logins attempts are tried on victims account and after getting access attacker run some malicious command and try to clear the tracks with some commands. I attach some KQL to help for further investigation for this IR report.
+
+KQL:-
+1.AttackLogs_CL
+| where RawData contains "Failed password"
+| extend SrcIP = extract(@"from (\S+)", 1, RawData),
+         User = extract(@"for (?:invalid user )?(\S+) from", 1, RawData)
+| summarize Attempts = count(), DistinctUsers = dcount(User), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by SrcIP
+| order by Attempts desc
+
+2.AttackLogs_CL
+| where RawData contains "Accepted password"
+| extend SrcIP = extract(@"from (\S+)", 1, RawData),
+         User = extract(@"for (\S+) from", 1, RawData)
+| project TimeGenerated, Host, SrcIP, User, RawData
+| order by TimeGenerated asc
+
+3.let window = 10m;
+let RemoteLogins = AttackLogs_CL
+    | where RawData has "Accepted password" and RawData has "ssh2"
+    | extend SrcIP = extract(@"from (\S+)", 1, RawData)
+    | project LoginTime = TimeGenerated, Host, SrcIP;
+let SudoCmds = AttackLogs_CL
+    | where RawData has "COMMAND="
+    | extend Cmd = extract(@"COMMAND=(.*)", 1, RawData),
+             User = extract(@"sudo:\s*(\S+)\s*:", 1, RawData)
+    | project CmdTime = TimeGenerated, Host, User, Cmd;
+RemoteLogins
+| join kind=inner (SudoCmds) on Host
+| where CmdTime between (LoginTime .. (LoginTime + window))
+| summarize LoginTime = min(LoginTime) by CmdTime, Host, SrcIP, User, Cmd
+| order by CmdTime asc
+
+4.AttackLogs_CL
+| where Host =~ "lavesh-VMware-Virtual-Platform"
+| where SourceType == "linux_secure"
+| where RawData has_any (
+    "/usr/bin/truncate",
+    "/bin/truncate",
+    "truncate -s",
+    "journalctl --vacuum",
+    "journalctl --rotate",
+    "rm /var/log",
+    "rm -rf /var/log",
+    "history -c"
+)
+| extend ExecutingUser = extract(@"sudo:\s+([^ ]+)\s*:", 1, RawData)
+| extend TTY = extract(@"TTY=([^ ]+)", 1, RawData)
+| extend WorkingDirectory = extract(@"PWD=([^ ]+)", 1, RawData)
+| extend ExecutedAs = extract(@"USER=([^ ]+)", 1, RawData)
+| extend Command = extract(@"COMMAND=(.*)$", 1, RawData)
+| project
+    TimeGenerated,
+    Host,
+    ExecutingUser,
+    ExecutedAs,
+    TTY,
+    WorkingDirectory,
+    Command,
+    RawData
+| order by TimeGenerated desc
+
+RECOMMENDATION:
+     - Isolate the victims machine from shuffle soar 
+     - Block the inbound and outbound connection form the 192.168.189.129
+     - Reset the victims credentials
+     - Disable the victims account and remove victim from the security groups and any groups
+
+IOCs:
+     - Attacker IP 192.168.189.129
+     - Attacker workstation name Kali
+     - run command for log clearing /usr/bin/truncate -s 0 /var/log/syslog
+
+ESCALATION: Escalate to L2 for deeper forensics (root cause, full kill chain reconstruction)
+            — NOT because L1 can't handle it, but because full RCA + threat-hunting across 
+            environment is L2/IR team scope per standard SOC workflow.
+
+STATUS:  Active->Escalate to L2(for deeper forensics (root cause, full kill chain reconstruction)).
